@@ -1,0 +1,5 @@
+# Windows/NVIDIA backend for run_vl_llm_extract_transformers.py.
+# Install CUDA PyTorch separately from the official PyTorch cu128 index.
+transformers
+accelerate
+bitsandbytes

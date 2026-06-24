@@ -1,0 +1,12 @@
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+
+paddlepaddle-gpu==3.2.1
+paddleocr
+pymupdf
+opencv-python
+pillow
+numpy
+pandas
+openpyxl
+rapidocr-onnxruntime
+onnxruntime-gpu==1.23.2
