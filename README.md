@@ -23,8 +23,8 @@ PDF 批量扫描（RapidOCR + Auto-VL）
 ### 1. 获取代码
 
 ```powershell
-git clone https://github.com/pupupuhao/audit_ocr.git E:\audit-ocr
-Set-Location E:\audit-ocr
+git clone https://github.com/pupupuhao/audit_ocr.git audit-ocr
+Set-Location .\audit-ocr
 ```
 
 ### 2. 创建 OCR 环境
@@ -35,7 +35,7 @@ Set-Location E:\audit-ocr
 conda create -n audit-ocr python=3.10 -y
 conda activate audit-ocr
 python -m pip install --upgrade pip
-python -m pip install -r E:\audit-ocr\requirements.txt
+python -m pip install -r .\requirements.txt
 ```
 
 `requirements.txt` 使用 PaddlePaddle CUDA 12.9 wheel。Blackwell 显卡需要 NVIDIA 驱动支持 CUDA 12.9 或更新版本。
@@ -45,9 +45,9 @@ python -m pip install -r E:\audit-ocr\requirements.txt
 模型文件不进入 Git，需要放到以下目录：
 
 ```text
-E:\audit-ocr\models\onnx\ppocrv5_mobile_det.onnx
-E:\audit-ocr\models\onnx\ppocrv5_mobile_rec.onnx
-E:\audit-ocr\models\onnx\ppocrv5_mobile_rec_keys.txt
+.\models\onnx\ppocrv5_mobile_det.onnx
+.\models\onnx\ppocrv5_mobile_rec.onnx
+.\models\onnx\ppocrv5_mobile_rec_keys.txt
 ```
 
 也可以使用 server 模型，但需在执行命令时通过 `--det-model-path`、`--rec-model-path`、`--rec-keys-path` 指定。
@@ -55,7 +55,7 @@ E:\audit-ocr\models\onnx\ppocrv5_mobile_rec_keys.txt
 PaddleOCR-VL 模型会在首次运行时自动下载并缓存到：
 
 ```text
-C:\Users\<用户名>\.paddlex\official_models\PaddleOCR-VL-1.5
+%USERPROFILE%\.paddlex\official_models\PaddleOCR-VL-1.5
 ```
 
 ### 4. 创建 Qwen GPU 环境
@@ -66,7 +66,7 @@ conda activate qwen-transformers
 
 # CUDA 12.8 PyTorch；与 RTX 50 系列环境配套。
 python -m pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-python -m pip install -r E:\audit-ocr\requirements_transformers_llm.txt
+python -m pip install -r .\requirements_transformers_llm.txt
 ```
 
 验证 Qwen 环境是否能看到 GPU：
@@ -77,17 +77,17 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 预期第二行输出 `True`。Qwen 模型会在第一次提取时自动下载到 Hugging Face 缓存；需预留约 6 GB 或更多磁盘空间。
 
-批处理脚本默认使用下面的 Python 路径；如 Conda 安装目录不同，可通过 `-QwenPython` 参数覆盖：
+批处理脚本需要指向 `qwen-transformers` 环境的 Python；可通过 `-QwenPython` 参数指定：
 
 ```text
-D:\Users\LEE\anaconda3\envs\qwen-transformers\python.exe
+<Conda安装目录>\envs\qwen-transformers\python.exe
 ```
 
 ### 5. 运行前检查
 
 ```powershell
 conda activate audit-ocr
-Set-Location E:\audit-ocr
+Set-Location .\audit-ocr
 python -c "import paddle; import onnxruntime as ort; print(paddle.__version__); print(ort.get_available_providers())"
 ```
 
@@ -105,11 +105,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ```powershell
 conda activate audit-ocr
-Set-Location E:\audit-ocr
+Set-Location <项目目录>
 
 python run_batch_ocr.py `
-  --input "E:\input" `
-  --output "E:\output_auto_vl_batch" `
+  --input ".\input" `
+  --output ".\output_auto_vl_batch" `
   --dpi 180
 ```
 
@@ -117,8 +117,8 @@ python run_batch_ocr.py `
 
 ```powershell
 python run_auto_vl_eval.py `
-  --file "E:\input\文件名.pdf" `
-  --output "E:\output_auto_vl" `
+  --file ".\input\文件名.pdf" `
+  --output ".\output_auto_vl" `
   --dpi 180
 ```
 
@@ -126,8 +126,8 @@ python run_auto_vl_eval.py `
 
 ```powershell
 python run_auto_vl_eval.py `
-  --file "E:\input\文件名.pdf" `
-  --output "E:\output_auto_vl" `
+  --file ".\input\文件名.pdf" `
+  --output ".\output_auto_vl" `
   --dpi 180 `
   --start-page 14 `
   --end-page 14
@@ -152,7 +152,7 @@ python run_auto_vl_eval.py `
 旧输出缺少 RapidOCR 或 `page_texts` 时，可用：
 
 ```powershell
-python run_fill_rapid_texts.py --input "E:\input" --output "E:\output_auto_vl" --dpi 180
+python run_fill_rapid_texts.py --input ".\input" --output ".\output_auto_vl" --dpi 180
 ```
 
 ## 2. 批量提取已有 VL 结果
@@ -160,18 +160,19 @@ python run_fill_rapid_texts.py --input "E:\input" --output "E:\output_auto_vl" -
 不重新扫描 PDF。脚本读取 `<VlOutput>\vl` 下的所有 PDF 文件夹，逐份运行 Qwen，并写入同一个业务 JSON 根目录。
 
 ```powershell
-Set-Location E:\audit-ocr
+Set-Location <项目目录>
 
 .\Run-VlLlmBatch.ps1 `
-  -VlOutput "E:\output_auto_vl_batch" `
-  -Output "E:\audit_ocr_vl_llm_json"
+  -VlOutput ".\output_auto_vl_batch" `
+  -Output ".\audit_ocr_vl_llm_json" `
+  -QwenPython "<Conda安装目录>\envs\qwen-transformers\python.exe"
 ```
 
 每份 PDF 生成：
 
 ```text
-E:\audit_ocr_vl_llm_json\business_json_vl_llm\<PDF名>\business_extract.json
-E:\audit_ocr_vl_llm_json\reports\<PDF名>_vl_llm_extract_summary.json
+.\audit_ocr_vl_llm_json\business_json_vl_llm\<PDF名>\business_extract.json
+.\audit_ocr_vl_llm_json\reports\<PDF名>_vl_llm_extract_summary.json
 ```
 
 调试 Qwen 提示词与响应：
@@ -183,10 +184,9 @@ E:\audit_ocr_vl_llm_json\reports\<PDF名>_vl_llm_extract_summary.json
 单文件提取也可以直接运行 Windows/NVIDIA 版本：
 
 ```powershell
-& "D:\Users\LEE\anaconda3\envs\qwen-transformers\python.exe" `
-  E:\audit-ocr\run_vl_llm_extract_transformers.py `
-  --vl-output "E:\output_auto_vl" `
-  --output "E:\audit_ocr_vl_llm_json" `
+conda run -n qwen-transformers python .\run_vl_llm_extract_transformers.py `
+  --vl-output ".\output_auto_vl" `
+  --output ".\audit_ocr_vl_llm_json" `
   --file "文件名" `
   --prefer-source md `
   --debug-llm
@@ -200,8 +200,8 @@ E:\audit_ocr_vl_llm_json\reports\<PDF名>_vl_llm_extract_summary.json
 conda activate audit-ocr
 
 python run_json_to_excel.py `
-  --input "E:\audit_ocr_vl_llm_json\business_json_vl_llm" `
-  --output "E:\audit_ocr_vl_llm_json\audit_ocr_export.xlsx"
+  --input ".\audit_ocr_vl_llm_json\business_json_vl_llm" `
+  --output ".\audit_ocr_vl_llm_json\audit_ocr_export.xlsx"
 ```
 
 ## 当前 VL 与提取范围
