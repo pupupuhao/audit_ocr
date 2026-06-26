@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="Output root to fill, e.g. output_vl_batch")
     parser.add_argument("--file", default=None, help="Process one PDF file name or absolute path.")
     parser.add_argument("--dpi", type=int, default=200, help="Render DPI if page images are missing. Default: 200")
+    parser.add_argument("--page", action="append", help="Specific 1-based page number(s), comma-separated or repeated.")
     parser.add_argument("--start-page", type=int, default=None, help="First 1-based page number to process.")
     parser.add_argument("--end-page", type=int, default=None, help="Last 1-based page number to process.")
     parser.add_argument("--max-pages", type=int, default=None, help="Process only first N selected pages.")
@@ -36,7 +37,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--det-model-path", default=_default_model(DEFAULT_DET_MODEL), help="RapidOCR det ONNX model.")
     parser.add_argument("--rec-model-path", default=_default_model(DEFAULT_REC_MODEL), help="RapidOCR rec ONNX model.")
     parser.add_argument("--rec-keys-path", default=_default_model(DEFAULT_REC_KEYS), help="RapidOCR rec dictionary.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        args.page_numbers = _parse_page_numbers(args.page)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
+
+
+def _parse_page_numbers(values: list[str] | None) -> list[int] | None:
+    if not values:
+        return None
+    pages: list[int] = []
+    for value in values:
+        for part in str(value).replace("，", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                page_no = int(part)
+            except ValueError as exc:
+                raise ValueError(f"invalid --page value: {part}") from exc
+            if page_no <= 0:
+                raise ValueError(f"--page must be positive: {page_no}")
+            pages.append(page_no)
+    return sorted(dict.fromkeys(pages))
 
 
 def _resolve_pdf_files(input_dir: Path, file_arg: str | None) -> list[Path]:
@@ -114,11 +139,20 @@ def _save_page_text(ocr_result: dict[str, Any], output_dir: Path, page_no: int) 
     }
 
 
-def _existing_page_images(pages_dir: Path, start_page: int | None, end_page: int | None, max_pages: int | None) -> list[str]:
+def _existing_page_images(
+    pages_dir: Path,
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int | None,
+    page_numbers: list[int] | None = None,
+) -> list[str]:
     paths = sorted(pages_dir.glob("page_*.png"))
+    page_set = set(page_numbers or [])
     selected = []
     for path in paths:
         page_no = _page_no_from_image_path(str(path))
+        if page_set and page_no not in page_set:
+            continue
         if start_page is not None and page_no < start_page:
             continue
         if end_page is not None and page_no > end_page:
@@ -143,7 +177,13 @@ def process_pdf(
     rapid_dir = output_root / "rapid_screen_ocr" / pdf_name
     text_dir = output_root / "page_texts" / pdf_name
 
-    image_paths = _existing_page_images(pages_dir, args.start_page, args.end_page, args.max_pages)
+    image_paths = _existing_page_images(
+        pages_dir,
+        args.start_page,
+        args.end_page,
+        args.max_pages,
+        page_numbers=args.page_numbers,
+    )
     if not image_paths:
         try:
             image_paths = pdf_to_images(
@@ -152,6 +192,7 @@ def process_pdf(
                 dpi=args.dpi,
                 start_page=args.start_page,
                 end_page=args.end_page,
+                page_numbers=args.page_numbers,
             )
             if args.max_pages is not None:
                 image_paths = image_paths[:args.max_pages]

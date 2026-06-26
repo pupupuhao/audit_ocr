@@ -1144,6 +1144,7 @@ def _clean_detected_sub_project(value: str) -> str:
     text = _SUB_PROJECT_NOISE_PATTERN.sub("", text)
     text = re.sub(r"(?:工程名称[：:]?)+", "", text)
     text = _collapse_repeated_sub_project_phrase(text)
+    text = re.sub(r"(?:[-—–_]X?\d+){5,}$", "", text, flags=re.IGNORECASE)
     text = text.rstrip("-—–_:：")
     text = re.sub(r"厘$", "幢", text)
     return text

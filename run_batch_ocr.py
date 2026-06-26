@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file-list", help="Text file with one PDF path/name per line.")
     parser.add_argument("--output", default="output_batch_ocr", help="Output root. Default: output_batch_ocr")
     parser.add_argument("--dpi", type=int, default=160, help="PDF render DPI. Default: 160")
+    parser.add_argument("--page", action="append", help="Specific 1-based page number(s), comma-separated or repeated.")
     parser.add_argument("--start-page", type=int, default=None, help="First 1-based page number to process.")
     parser.add_argument("--end-page", type=int, default=None, help="Last 1-based page number to process.")
     parser.add_argument("--max-pages", type=int, default=None, help="Process only first N selected pages per PDF.")
@@ -40,7 +41,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rec-model-path", default=_default_model(DEFAULT_REC_MODEL), help="RapidOCR rec ONNX model for auto-vl.")
     parser.add_argument("--rec-keys-path", default=_default_model(DEFAULT_REC_KEYS), help="RapidOCR rec dictionary for auto-vl.")
     parser.add_argument("--dry-run", action="store_true", help="Print selected files without running OCR.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        args.page_numbers = _parse_page_numbers(args.page)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
+
+
+def _parse_page_numbers(values: list[str] | None) -> list[int] | None:
+    if not values:
+        return None
+    pages: list[int] = []
+    for value in values:
+        for part in str(value).replace("，", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                page_no = int(part)
+            except ValueError as exc:
+                raise ValueError(f"invalid --page value: {part}") from exc
+            if page_no <= 0:
+                raise ValueError(f"--page must be positive: {page_no}")
+            pages.append(page_no)
+    return sorted(dict.fromkeys(pages))
 
 
 def _default_model(path: Path) -> str | None:
@@ -105,6 +130,7 @@ def run_one_pdf(pdf_path: Path, output_root: Path, args: argparse.Namespace) -> 
         args.max_pages,
         start_page=args.start_page,
         end_page=args.end_page,
+        page_numbers=args.page_numbers,
         det_model_path=args.det_model_path,
         rec_model_path=args.rec_model_path,
         rec_keys_path=args.rec_keys_path,

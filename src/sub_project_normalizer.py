@@ -14,6 +14,7 @@ _PROJECT_NAME_LABEL_RE = re.compile(r"(?:单位（专业）)?工程名称[：:]"
 _TABLE_TITLE_RE = re.compile(
     r"(?:单位（专业）工程招标控制价费用表|单位工程费用表|分部分项工程清单与计价表|工程量确认单|专业工程费用表|专业费用表)"
 )
+_TRAILING_COORDINATE_SUFFIX_RE = re.compile(r"(?:[-—–_]X?\d+){5,}$", re.IGNORECASE)
 
 
 def _compact(value: str) -> str:
@@ -52,6 +53,7 @@ def _extract_project_name_value(text: str) -> str:
 def _clean_project_root(value: str) -> str:
     text = _compact(value)
     text = _NOISE_RE.sub("", text)
+    text = _TRAILING_COORDINATE_SUFFIX_RE.sub("", text)
     text = re.sub(r"(?:结算|审核|咨询)?报告书$", "", text)
     text = re.sub(r"^\d{2,4}[.．-]\d{1,2}[.．-]\d{1,2}", "", text)
     text = re.sub(r"(?:-\s*)?\d+(?:[、,，]\d+)*(?:[—\-–]\d+)*\s*(?:幢|幛|栋|号楼?|厘).*$", "", text)
@@ -83,6 +85,7 @@ def clean_sub_project_name(value: str, file_name: str = "", document_info: dict[
     text = _NOISE_RE.sub("", text)
     text = re.sub(r"(?:工程名称[：:]?)+", "", text)
     text = _collapse_repeated_phrase(text)
+    text = _TRAILING_COORDINATE_SUFFIX_RE.sub("", text)
     text = text.rstrip("-—–_:：")
 
     room_match = _ROOM_RE.search(text)

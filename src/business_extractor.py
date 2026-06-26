@@ -119,7 +119,7 @@ def classify_page(page_text: str, table: dict[str, Any] | None = None) -> dict[s
         table_types.append("specialty_fee_table")
 
     sub_project = ""
-    sub_project_tables = {"unit_project_fee_table", "sub_item_project_table"}
+    sub_project_tables = {"sub_item_project_table"}
     if table and any(tt in sub_project_tables for tt in table_types):
         sub_project = detect_sub_project(table, page_text)
     elif page_text:

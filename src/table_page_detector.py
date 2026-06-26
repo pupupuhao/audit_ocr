@@ -41,13 +41,14 @@ STRONG_TABLE_KEYWORDS = [
 ]
 
 TARGET_TABLE_WHITELIST = [
-    "单位（专业）工程招标控制价费用表",
     "分部分项工程清单与计价表",
 ]
 
 TARGET_TABLE_BLACKLIST = [
     # These tables are intentionally kept as RapidOCR/page_text output only;
     # they are not part of the current VL extraction scope.
+    "单位（专业）工程招标控制价费用表",
+    "单位（专业）工程费用表",
     "专业工程费用表",
     "专业费用表",
     "主要工日一览表",
@@ -107,7 +108,6 @@ def _keyword_hits(compact_text: str, keywords: list[str]) -> list[str]:
 def _target_pattern_hits(compact_text: str) -> list[str]:
     checks = [
         ("分部分项工程清单与计价表", ["分部分项", "清单", "计价"]),
-        ("单位（专业）工程招标控制价费用表", ["招标控制价", "费用"]),
     ]
     return [name for name, parts in checks if all(part in compact_text for part in parts)]
 
@@ -115,6 +115,8 @@ def _target_pattern_hits(compact_text: str) -> list[str]:
 def _skip_pattern_hits(compact_text: str) -> list[str]:
     """Recognize excluded table titles even if OCR loses a little punctuation."""
     checks = [
+        ("单位（专业）工程招标控制价费用表", ["招标控制价", "费用"]),
+        ("单位（专业）工程费用表", ["单位", "专业", "工程费用表"]),
         ("施工工艺", ["施工工艺"]),
         ("专业工程费用表", ["专业工程", "费用表"]),
         ("专业费用表", ["专业", "费用表"]),
@@ -131,7 +133,6 @@ def _target_structure_hits(compact_text: str) -> list[str]:
         ("sub_item_project_columns", ["项目编码", "项目名称", "综合单价"]),
         ("sub_item_project_columns", ["项目编码", "项目名称", "合价"]),
         ("sub_item_project_long_text_columns", ["项目名称", "项目特征", "工程量"]),
-        ("unit_project_fee_columns", ["费用名称", "计算公式", "金额"]),
     ]
     hits = []
     for name, parts in checks:

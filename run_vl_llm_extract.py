@@ -47,6 +47,7 @@ RULE_TYPE_TO_LLM_TYPE = {
 # only control what the current VL -> Qwen run sends for field extraction.
 # To restore a table type later, comment out its corresponding line here.
 DISABLED_RULE_TABLE_TYPES = {
+    "unit_project_fee_table",                 # 单位（专业）工程费用表 / 招标控制价费用表
     "specialty_fee_table",                    # 专业工程费用表 / 专业费用表
     "quantity_resource_subtable_labor",       # 主要工日一览表
     "quantity_resource_subtable_material_equipment",  # 主要材料和工程设备一览表
@@ -79,6 +80,31 @@ def is_number_text(value: Any) -> bool:
     text = str(value or "").strip()
     text = re.sub(r"[￥¥,\s]", "", text)
     return bool(text and re.fullmatch(r"\d+(?:\.\d+)?", text))
+
+
+def is_sub_item_summary_like_row(row: dict[str, Any]) -> bool:
+    seq = str(row.get("seq", "") or "").strip()
+    project_code = str(row.get("project_code", "") or "").strip()
+    project_name = compact_text(row.get("project_name", ""))
+    if re.fullmatch(r"\d+", seq) or project_code:
+        if not project_code or not re.fullmatch(r"\d+(?:#|栋|幢|号楼)", project_code):
+            return False
+        return not any(
+            str(row.get(field, "") or "").strip()
+            for field in ("project_name", "project_description", "unit", "quantity", "remark")
+        )
+    if project_name in {"本页小计", "小计", "合计"}:
+        return True
+    if re.fullmatch(r"\d+(?:#|栋|幢|号楼)?", project_name):
+        return True
+    return False
+
+
+def can_index_backfill_sub_item(row: dict[str, Any]) -> bool:
+    seq = str(row.get("seq", "") or "").strip()
+    project_code = str(row.get("project_code", "") or "").strip()
+    project_name = str(row.get("project_name", "") or "").strip()
+    return bool(re.fullmatch(r"\d+", seq) or project_code or (seq and project_name))
 
 
 def find_table_column(grid: list[Any], keywords: list[str], max_rows: int = 8) -> int | None:
@@ -226,6 +252,8 @@ def backfill_sub_item_unit_price_from_grid(
     for index, row in enumerate(rows):
         project_code = str(row.get("project_code", "") or "").strip()
         seq = str(row.get("seq", "") or "").strip()
+        if is_sub_item_summary_like_row(row):
+            continue
         is_sub_project_summary = (
             bool(re.fullmatch(r"\d+\s*#", project_code))
             and not re.fullmatch(r"\d+", seq)
@@ -246,7 +274,7 @@ def backfill_sub_item_unit_price_from_grid(
         source_row = by_project_code.get(project_code) if project_code else None
         if source_row is None:
             source_row = by_seq_name.get(seq_name_key)
-        if source_row is None and index < len(rule_rows):
+        if source_row is None and can_index_backfill_sub_item(row) and index < len(rule_rows):
             source_row = rule_rows[index]
 
         if not re.fullmatch(r"\d+", seq):
@@ -269,10 +297,7 @@ def backfill_sub_item_unit_price_from_grid(
 
 
 def should_switch_sub_project(rule_table_types: list[str], current_sub_project: str) -> bool:
-    return any(
-        table_type in {"unit_project_fee_table", "sub_item_project_table"}
-        for table_type in rule_table_types
-    )
+    return "sub_item_project_table" in rule_table_types
 
 
 def page_no_from_path(path: Path) -> int:
@@ -471,8 +496,36 @@ def read_page_texts_from_source_root(source_root: Path, pdf_name: str) -> dict[i
     return pages
 
 
-def _filter_page_numbers(page_numbers: list[int], start_page: int, end_page: int, max_pages: int) -> list[int]:
+def _parse_page_numbers(values: list[str] | None) -> list[int] | None:
+    if not values:
+        return None
+    pages: list[int] = []
+    for value in values:
+        for part in str(value).replace("，", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                page_no = int(part)
+            except ValueError as exc:
+                raise ValueError(f"invalid --page value: {part}") from exc
+            if page_no <= 0:
+                raise ValueError(f"--page must be positive: {page_no}")
+            pages.append(page_no)
+    return sorted(dict.fromkeys(pages))
+
+
+def _filter_page_numbers(
+    page_numbers: list[int],
+    start_page: int,
+    end_page: int,
+    max_pages: int,
+    selected_pages: list[int] | None = None,
+) -> list[int]:
     result = sorted(page_numbers)
+    if selected_pages:
+        selected_page_set = set(selected_pages)
+        result = [page_no for page_no in result if page_no in selected_page_set]
     if start_page > 0:
         result = [page_no for page_no in result if page_no >= start_page]
     if end_page > 0:
@@ -483,7 +536,7 @@ def _filter_page_numbers(page_numbers: list[int], start_page: int, end_page: int
 
 
 def is_partial_page_run(args: argparse.Namespace) -> bool:
-    return args.start_page > 0 or args.end_page > 0 or args.max_pages > 0
+    return bool(args.page_numbers) or args.start_page > 0 or args.end_page > 0 or args.max_pages > 0
 
 
 def _row_page_no(row: Any) -> int:
@@ -731,11 +784,16 @@ def main() -> None:
         default="auto",
         help="Which VL artifact to read. auto uses HTML tables first, then MD tables; page text still falls back to MD/JSON/HTML.",
     )
+    parser.add_argument("--page", action="append", help="Specific 1-based page number(s), comma-separated or repeated.")
     parser.add_argument("--start-page", type=int, default=0, help="First page number to process, 1-based.")
     parser.add_argument("--end-page", type=int, default=0, help="Last page number to process, inclusive.")
     parser.add_argument("--max-pages", type=int, default=0, help="Max pages to process per PDF after page filtering.")
     parser.add_argument("--debug-llm", action="store_true", help="Save raw Qwen prompts and responses.")
     args = parser.parse_args()
+    try:
+        args.page_numbers = _parse_page_numbers(args.page)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     vl_root = Path(args.vl_output)
     output_root = Path(args.output)
@@ -777,6 +835,7 @@ def main() -> None:
             args.start_page,
             args.end_page,
             args.max_pages,
+            args.page_numbers,
         )
 
         sub_projects_map: dict[str, dict[str, Any]] = {}

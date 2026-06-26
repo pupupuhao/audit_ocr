@@ -2,6 +2,7 @@
 
 paddlepaddle-gpu==3.2.1
 paddleocr
+paddlex[ocr]
 pymupdf
 opencv-python
 pillow

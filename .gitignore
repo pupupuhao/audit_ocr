@@ -4,3 +4,8 @@ __pycache__/
 output*/
 debug_llm/
 models/
+*.tsv
+*_rows.json
+cleaning_removed_rows.json
+excel_json_removed_rows.json
+rerun_qwen_*pages.sh

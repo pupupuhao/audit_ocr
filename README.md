@@ -1,6 +1,6 @@
 # 审价 PDF OCR 与结构化提取
 
-本项目将审价 PDF 转为页面图像和 OCR 文本，仅对需要的计价表调用 PaddleOCR-VL，再使用本地 Qwen 生成业务 JSON 与 Excel。
+本项目将审价 PDF 转为页面图像和 OCR 文本，仅对需要的计价表调用 PaddleOCR-VL，再使用本地 Qwen 生成业务 JSON。Excel 可用单独脚本按需导出。
 
 当前推荐流程：
 
@@ -8,7 +8,7 @@
 PDF 批量扫描（RapidOCR + Auto-VL）
     → 已有 OCR/VL 结果批量 Qwen 提取
     → business_extract.json
-    → Excel
+    → 单文件 JSON 汇总
 ```
 
 ## 部署指南（Windows + NVIDIA GPU）
@@ -17,7 +17,7 @@ PDF 批量扫描（RapidOCR + Auto-VL）
 
 | 环境 | 用途 |
 | --- | --- |
-| `audit-ocr` | PDF 渲染、RapidOCR、PaddleOCR-VL、Excel 导出 |
+| `audit-ocr` | PDF 渲染、RapidOCR、PaddleOCR-VL、JSON 汇总、Excel 导出 |
 | `qwen-transformers` | Qwen2.5-7B-Instruct 4-bit GPU 提取 |
 
 ### 1. 获取代码
@@ -97,6 +97,46 @@ PowerShell 若禁止运行批处理脚本，可仅在当前窗口放行：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+## 0. 一键完整链路
+
+运行 Auto-VL、Qwen 提取和单文件 JSON 汇总：
+
+```powershell
+conda activate audit-ocr
+Set-Location <项目目录>
+
+.\Run-FullPipeline.ps1 `
+  -Input ".\input" `
+  -VlOutput ".\output_auto_vl_batch" `
+  -Output ".\audit_ocr_vl_llm_json" `
+  -QwenPython "<Conda安装目录>\envs\qwen-transformers\python.exe"
+```
+
+默认产出：
+
+```text
+.\audit_ocr_vl_llm_json\business_json_vl_llm\<PDF名>\business_extract.json
+.\audit_ocr_vl_llm_json\business_extract_all.json
+```
+
+指定页码可直接贯穿 VL 和提取：
+
+```powershell
+.\Run-FullPipeline.ps1 `
+  -Input ".\input" `
+  -Page 14 `
+  -QwenPython "<Conda安装目录>\envs\qwen-transformers\python.exe"
+```
+
+Linux 服务器可通过环境变量调整 PaddleOCR-VL 后端：
+
+```bash
+export AUDIT_OCR_VL_DEVICE=gpu:0
+export AUDIT_OCR_VL_USE_QUEUES=0
+# 如 paddle_dynamic 推理异常，可切换官方支持的 transformers 引擎
+export AUDIT_OCR_VL_ENGINE=transformers
 ```
 
 ## 1. 批量 OCR / Auto-VL
@@ -209,13 +249,13 @@ python run_json_to_excel.py `
 当前会送入 VL、并参与 Qwen 表格提取的核心表格：
 
 ```text
-单位（专业）工程招标控制价费用表
 分部分项工程清单与计价表
 ```
 
 以下类型仍保留 RapidOCR 与 `page_texts`，但当前不跑 VL，也不送入 Qwen 表格提取：
 
 ```text
+单位（专业）工程招标控制价费用表 / 单位（专业）工程费用表
 专业工程费用表 / 专业费用表
 主要工日一览表
 主要材料和工程设备一览表
@@ -243,11 +283,13 @@ construction_processes
 pages
 ```
 
-`sub_projects` 将单位工程费用表和分部分项表按工程名称/楼栋编号归并。工程名称后的表头行会跳过标段、页码与列名，并兼容 `42#`、`1-15幢`、`1101室` 等独立编号行。
+`sub_projects` 以分部分项工程清单与计价表中的工程名称/楼栋编号归并。工程名称后的表头行会跳过标段、页码与列名，并兼容 `42#`、`1-15幢`、`1101室` 等独立编号行。
 
 ## 主要脚本
 
 ```text
+Run-FullPipeline.ps1                  一键 Auto-VL、Qwen 提取、汇总 JSON
+run_full_pipeline_gpu.sh              Linux 服务器一键 Auto-VL、Qwen 提取、汇总 JSON
 run_batch_ocr.py                     批量 Auto-VL OCR
 run_auto_vl_eval.py                  单文件/指定页 Auto-VL OCR
 Run-VlLlmBatch.ps1                   批量提取已有 OCR/VL 结果

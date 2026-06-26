@@ -13,6 +13,20 @@ _VL_ENGINE: Any | None = None
 _WINDOWS_DLL_DIR_HANDLES: list[Any] = []
 
 
+def _env_bool(name: str, default: bool | None = None) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return int(value)
+
+
 def _configure_windows_nvidia_dlls() -> None:
     """Expose pip-installed CUDA DLLs before PaddleX imports PyTorch."""
     if os.name != "nt":
@@ -41,16 +55,26 @@ def _get_vl_engine() -> Any:
         _configure_windows_nvidia_dlls()
         from paddleocr import PaddleOCRVL
 
-        _VL_ENGINE = PaddleOCRVL(
-            pipeline_version="v1.5",
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_layout_detection=True,
-            use_chart_recognition=False,
-            use_seal_recognition=False,
-            use_ocr_for_image_block=False,
-            format_block_content=True,
-        )
+        kwargs: dict[str, Any] = {
+            "pipeline_version": os.getenv("AUDIT_OCR_VL_PIPELINE_VERSION", "v1.5"),
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_layout_detection": _env_bool("AUDIT_OCR_VL_USE_LAYOUT_DETECTION", True),
+            "use_chart_recognition": False,
+            "use_seal_recognition": False,
+            "use_ocr_for_image_block": False,
+            "format_block_content": True,
+        }
+        engine = os.getenv("AUDIT_OCR_VL_ENGINE")
+        if engine:
+            kwargs["engine"] = engine
+        device = os.getenv("AUDIT_OCR_VL_DEVICE")
+        if device:
+            kwargs["device"] = device
+        use_queues = _env_bool("AUDIT_OCR_VL_USE_QUEUES")
+        if use_queues is not None:
+            kwargs["use_queues"] = use_queues
+        _VL_ENGINE = PaddleOCRVL(**kwargs)
     return _VL_ENGINE
 
 
@@ -129,7 +153,20 @@ def run_vl_ocr(image_path: str, output_dir: str, page_no: int) -> dict:
     output = ensure_dir(output_dir)
     engine = _get_vl_engine()
     with ascii_temp_image_path(image_path) as engine_image_path:
-        raw_results = list(engine.predict(engine_image_path))
+        predict_kwargs: dict[str, Any] = {}
+        prompt_label = os.getenv("AUDIT_OCR_VL_PROMPT_LABEL")
+        if prompt_label:
+            predict_kwargs["prompt_label"] = prompt_label
+        max_new_tokens = _env_int("AUDIT_OCR_VL_MAX_NEW_TOKENS")
+        if max_new_tokens is not None:
+            predict_kwargs["max_new_tokens"] = max_new_tokens
+        min_pixels = _env_int("AUDIT_OCR_VL_MIN_PIXELS")
+        if min_pixels is not None:
+            predict_kwargs["min_pixels"] = min_pixels
+        max_pixels = _env_int("AUDIT_OCR_VL_MAX_PIXELS")
+        if max_pixels is not None:
+            predict_kwargs["max_pixels"] = max_pixels
+        raw_results = list(engine.predict(input=engine_image_path, **predict_kwargs))
     page_payloads: list[dict[str, Any]] = []
     markdown_parts: list[str] = []
     html_count = 0

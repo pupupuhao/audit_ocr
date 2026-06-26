@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,74 @@ def json_cell(value: Any) -> str:
     if value in (None, "", [], {}):
         return ""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def normalize_unit(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\$\s*m\^\{?2\}?\s*\$", "m2", text)
+    text = re.sub(r"\s+", "", text)
+    return text
+
+
+def is_detail_sub_item_row(row: dict[str, Any]) -> bool:
+    seq = str(row.get("seq") or "").strip()
+    project_name = str(row.get("project_name") or "").strip()
+    if not seq or not re.fullmatch(r"\d+(?:\.\d+)?", seq):
+        return False
+    return bool(project_name)
+
+
+def quality_warnings(row: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    project_code = str(row.get("project_code") or "").strip()
+    project_name = str(row.get("project_name") or "").strip()
+    unit_price = str(row.get("unit_price") or "").strip()
+    sub_project_id = str(row.get("sub_project_id") or "").strip()
+    combined = f"{project_code} {project_name} {sub_project_id}"
+
+    if not project_code:
+        warnings.append("缺少code")
+    if unit_price and (unit_price == project_code or re.fullmatch(r"\d{9,15}", unit_price)):
+        warnings.append("疑似金额列错位")
+    if any(token in project_name for token in ("本页小计", "合计", "小计")):
+        warnings.append("疑似小计/合计")
+    if re.search(r"-X\d+(?:-\d+){2,}", combined):
+        warnings.append("疑似坐标乱码")
+    return warnings
+
+
+def cleaned_sub_item_rows(rows: Any) -> list[dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+
+    cleaned_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or not is_detail_sub_item_row(row):
+            continue
+        cleaned_row = dict(row)
+        cleaned_row["unit"] = normalize_unit(cleaned_row.get("unit"))
+        cleaned_rows.append(cleaned_row)
+    return cleaned_rows
+
+
+def sub_item_rows_cell(rows: Any) -> str:
+    return json_cell(cleaned_sub_item_rows(rows))
+
+
+def sub_item_warnings_cell(rows: Any) -> str:
+    warnings: list[dict[str, Any]] = []
+    for index, row in enumerate(cleaned_sub_item_rows(rows)):
+        row_warnings = quality_warnings(row)
+        if not row_warnings:
+            continue
+        warnings.append({
+            "row_index": index,
+            "seq": row.get("seq", ""),
+            "project_code": row.get("project_code", ""),
+            "project_name": row.get("project_name", ""),
+            "warnings": row_warnings,
+        })
+    return json_cell(warnings)
 
 
 def construction_process_content(processes: Any) -> str:
@@ -60,14 +129,9 @@ def rows_from_payload(payload: dict[str, Any], source_json: Path) -> list[dict[s
     shared = {
         "file_name": payload.get("file_name", ""),
         "consultation_project_name": document_info.get("consultation_project_name", ""),
+        "consultation_time": document_info.get("consultation_time", "") or document_info.get("consultation_date", ""),
+        "location": document_info.get("location", "") or payload.get("location", ""),
         "renovation_content": document_info.get("renovation_content", ""),
-        "specialty_fee_rows": json_cell(payload.get("specialty_fee_rows", [])),
-        "quantity_confirm_rows": json_cell(payload.get("quantity_confirm_rows", [])),
-        "labor_rows": json_cell(payload.get("labor_rows", [])),
-        "material_rows": json_cell(payload.get("material_rows", [])),
-        "machine_rows": json_cell(payload.get("machine_rows", [])),
-        "construction_processes_content": construction_process_content(payload.get("construction_processes", [])),
-        "source_json": str(source_json),
     }
 
     sub_projects = payload.get("sub_projects")
@@ -75,11 +139,8 @@ def rows_from_payload(payload: dict[str, Any], source_json: Path) -> list[dict[s
         return [
             {
                 **shared,
-                "sub_project_id": "",
-                "sub_project_name": "",
-                "parent_project": "",
-                "unit_project_fee_rows": "",
                 "sub_item_project_rows": "",
+                "sub_item_project_warnings": "",
             }
         ]
 
@@ -90,11 +151,8 @@ def rows_from_payload(payload: dict[str, Any], source_json: Path) -> list[dict[s
         rows.append(
             {
                 **shared,
-                "sub_project_id": sub_project.get("sub_project_id", ""),
-                "sub_project_name": sub_project.get("sub_project_name", ""),
-                "parent_project": sub_project.get("parent_project", ""),
-                "unit_project_fee_rows": json_cell(sub_project.get("unit_project_fee_rows", [])),
-                "sub_item_project_rows": json_cell(sub_project.get("sub_item_project_rows", [])),
+                "sub_item_project_rows": sub_item_rows_cell(sub_project.get("sub_item_project_rows", [])),
+                "sub_item_project_warnings": sub_item_warnings_cell(sub_project.get("sub_item_project_rows", [])),
             }
         )
     return rows
@@ -112,20 +170,12 @@ def write_excel(rows: list[dict[str, Any]], output_path: Path) -> None:
 
     headers = [
         "file_name",
-        "sub_project_name",
         "consultation_project_name",
+        "consultation_time",
+        "location",
         "renovation_content",
-        "sub_project_id",
-        "parent_project",
-        "unit_project_fee_rows",
         "sub_item_project_rows",
-        "specialty_fee_rows",
-        "quantity_confirm_rows",
-        "labor_rows",
-        "material_rows",
-        "machine_rows",
-        "construction_processes_content",
-        "source_json",
+        "sub_item_project_warnings",
     ]
 
     workbook = Workbook()
@@ -140,7 +190,12 @@ def write_excel(rows: list[dict[str, Any]], output_path: Path) -> None:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    wrap_columns = set(headers) - {"file_name", "sub_project_id", "sub_project_name", "parent_project"}
+    wrap_columns = {
+        "consultation_project_name",
+        "renovation_content",
+        "sub_item_project_rows",
+        "sub_item_project_warnings",
+    }
     for column_index, header in enumerate(headers, start=1):
         letter = get_column_letter(column_index)
         if header in wrap_columns:

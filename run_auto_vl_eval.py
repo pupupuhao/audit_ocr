@@ -25,13 +25,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="output_auto_vl", help="Output directory. Default: output_auto_vl")
     parser.add_argument("--file", default=None, help="Process one PDF file name or path.")
     parser.add_argument("--dpi", type=int, default=220, help="PDF render DPI. Default: 220")
+    parser.add_argument("--page", action="append", help="Specific 1-based page number(s), comma-separated or repeated.")
     parser.add_argument("--max-pages", type=int, default=None, help="Process only the first N pages.")
     parser.add_argument("--start-page", type=int, default=None, help="First 1-based page number to process.")
     parser.add_argument("--end-page", type=int, default=None, help="Last 1-based page number to process.")
     parser.add_argument("--det-model-path", default=_default_model(DEFAULT_DET_MODEL), help="RapidOCR det ONNX model.")
     parser.add_argument("--rec-model-path", default=_default_model(DEFAULT_REC_MODEL), help="RapidOCR rec ONNX model.")
     parser.add_argument("--rec-keys-path", default=_default_model(DEFAULT_REC_KEYS), help="RapidOCR rec dictionary.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    try:
+        args.page_numbers = _parse_page_numbers(args.page)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
+
+
+def _parse_page_numbers(values: list[str] | None) -> list[int] | None:
+    if not values:
+        return None
+    pages: list[int] = []
+    for value in values:
+        for part in str(value).replace("，", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                page_no = int(part)
+            except ValueError as exc:
+                raise ValueError(f"invalid --page value: {part}") from exc
+            if page_no <= 0:
+                raise ValueError(f"--page must be positive: {page_no}")
+            pages.append(page_no)
+    return sorted(dict.fromkeys(pages))
 
 
 def _default_model(path: Path) -> str | None:
@@ -129,6 +154,7 @@ def process_pdf_auto_vl(
     max_pages: int | None,
     start_page: int | None = None,
     end_page: int | None = None,
+    page_numbers: list[int] | None = None,
     det_model_path: str | None = None,
     rec_model_path: str | None = None,
     rec_keys_path: str | None = None,
@@ -153,6 +179,7 @@ def process_pdf_auto_vl(
             dpi=dpi,
             start_page=start_page,
             end_page=end_page,
+            page_numbers=page_numbers,
         )
     except Exception as exc:
         errors.append({"stage": "pdf_to_images", "error": str(exc), "traceback": traceback.format_exc()})
@@ -302,6 +329,7 @@ def main() -> None:
             args.max_pages,
             start_page=args.start_page,
             end_page=args.end_page,
+            page_numbers=args.page_numbers,
             det_model_path=args.det_model_path,
             rec_model_path=args.rec_model_path,
             rec_keys_path=args.rec_keys_path,
